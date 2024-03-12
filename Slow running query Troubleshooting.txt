@@ -1,0 +1,399 @@
+
+https://dbakeeda.blogspot.com/2016/04/how-to-troubleshoot-slow-running-query.html
+
+Step by Step: How to troubleshoot a slow running query in Oracle
+This is a day to day task of a DBA. Someone from application team comes to our desk and simply says a query is running slow. We may question him on many things but ultimately a DBA has to tune the query at the end.
+
+This is also very popular and known question for the DBA's who are attending interviews. This question is simply asked again and again. I have also been asked this question multiple times. After a pause, interviewer simply asks...so suppose a user comes and reports that his query is running slow, what will be your approach to tune this.
+
+There is no absolute or concrete answer to this question because there might be multiple way to tune a slow running query. Everyone can have a different approach.
+
+So here is my approach:
+
+Very first thing we have to find which type of query is running slow. Whether it is SELECT query of DML statements(insert, update, delete and merge).
+
+So first we will see how to tune a SELECT query
+
+Step 1 – Find the SQL_ID of the slow running query
+
+There could be two possibilities:
+
+ 1) Query is still running: If the slow query is still running then we can find the sql_id of the query by using v$session view.
+
+SQL>select sql_id
+from v$session
+where sid = 3089;
+Output:
+SQL_ID
+—————————————————
+g0uubmuvk4uax
+
+2)  Query is completed: It might be query is completed but application team got to know it later that the query was slow and it did not finish in its usual time. Since this query is not running right now, we can’t query v$session to get its information.
+
+So for this we use AWR/ASH report. We ask application team that at what time the query was running and for that duration we generate the AWR. In ASH report we find all kind of information regarding the top SQL’s. Basically we see SQL STATISTIS section of the AWR report. In this section there is SQL ORDERED BY ELAPSED TIME which matters most to us. If the query which is reported by application team is present in this section then we note down the sql_id of the query. Otherwise we generate ASH report for that particular time and get the sql_id.
+  
+Step 2 – Run the SQL Tuning advisor for that SQL_ID
+
+After finding the sql_id we can run sql tuning advisor on this sql_id.
+Use below steps to run the sql tuning advisor and display its output:
+
+1. Create tuning task for specific Sql id:
+
+SET SERVEROUTPUT ON
+DECLARE
+  l_sql_tune_task_id  VARCHAR2(100);
+BEGIN
+  l_sql_tune_task_id := DBMS_SQLTUNE.create_tuning_task (
+                          sql_id      => 'g0uubmuvk4uax',
+                          scope       => DBMS_SQLTUNE.scope_comprehensive,
+                          time_limit  => 60,
+                          task_name   => 'g0uubmuvk4uax_tuning_task',
+                          description => 'Tuning task for statement g0uubmuvk4uax.');
+  DBMS_OUTPUT.put_line('l_sql_tune_task_id: ' || l_sql_tune_task_id);
+END;
+/
+
+2. Execute the tuning task:
+
+EXEC DBMS_SQLTUNE.execute_tuning_task(task_name => 'g0uubmuvk4uax_tuning_task');
+
+
+3. Display the recommendations:
+
+Once the tuning task has executed successfully the recommendations can be displayed using the REPORT_TUNING_TASK function.
+
+SET LONG 10000;
+SET PAGESIZE 1000
+SET LINESIZE 200
+
+SELECT DBMS_SQLTUNE.report_tuning_task('g0uubmuvk4uax_tuning_task') AS recommendations FROM dual;
+
+SET PAGESIZE 24
+
+
+Based on the tuning advisor recommendation we have to take corrective actions. These recommendation could be and many more:
+
+1) Gather Statistics
+2) Create Index
+3) Drop Index
+4) Join orders
+5) Accept sql profile
+6) Create baseline and many more recommnendations
+
+Before applying any corrective action on production, we need to test that in DEV/QA/UAT/TEST environment or we can ask an tuning expert that this is the recommendation. After all the analysis we should apply in the production database.
+
+After corrective action from tuning advisor run the SQL again and see the improvement.
+
+Step 3 - Check the sql plan hash value and pin the good plan:
+
+Sometime SQL tuning advisor does not recommend anything, in that case we have to go for a different approach.
+
+check if there is any change in the sql plan.
+
+set lines 500
+set pages 500
+col Snap for a25
+col SQL_PROFILE for a40
+select distinct b.BEGIN_INTERVAL_TIME as Snap, a.PLAN_HASH_VALUE as plan, a.EXECUTIONS_DELTA as EXECUTIONS, a.ELAPSED_TIME_DELTA/1000000 as ELAPSED_SEC, ROWS_PROCESSED_DELTA as "ROWS" , a.ROWS_PROCESSED_DELTA/CASE WHEN a.EXECUTION_DELTA = 0 THEN -1 ELSE a.EXECUTIONS_DELTA END "Avg Rows", a.ELAPSED_TIME_DELTA/1000000/CASE WHEN a. EXECUTION_DELTA = 0 THEN -1 ELSE a.EXECUTION_DELTA END "Avg Elapsed", a.optimizer_cost, a.SQL_PROFILE from DBA_HIST_SQLSTAT a, DBA_HIST_SNAPHOT b where a.SQL_ID = '&sqlid' and a.snap_id = b.snap_id order by b.BEGIN_INTERVAL_TIME
+
+We can also use below query to to find out the sql plan for n number of days:
+(Show the plan has value for a given sqlid over a given period)
+
+SET PAUSE ON
+SET PAUSE 'Press Return to Continue'
+SET PAGESIZE 60
+SET LINESIZE 300
+
+SELECT DISTINCT sql_id, plan_hash_value
+FROM dba_hist_sqlstat q,
+    (
+    SELECT /*+ NO_MERGE */ MIN(snap_id) min_snap, MAX(snap_id) max_snap
+    FROM dba_hist_snapshot ss
+    WHERE ss.begin_interval_time BETWEEN (SYSDATE - &No_Days) AND SYSDATE
+    ) s
+WHERE q.snap_id BETWEEN s.min_snap AND s.max_snap
+  AND q.sql_id IN ( '&SQLID')
+/
+
+here we have to supply the value for number of days.
+
+We can see the entire plan for n number of days the query has used. It is not mandatory that plan is changed. Here it also displays which plan takes how much time executes. So if there is change in plan, we should find best plan and pin it. Plan could be changed due to several reasons like change in the sql, due to stats gathering and many more.
+
+Step 4 - Use TOP command to check the CPU usages by various processes:
+
+TOP command is also useful for performance tuning. Many times, in a single server multiple databases are running. It may happen that one database is consuming more server resources than others. So we have to find out which oracle process is consuming more resources and it is related to which database. For this we use  TOP command. If we see there is CPU used by an oracle process is very high then this a matter of subject to worry about.
+
+$top
+
+Output of the top command 
+top - 10:56:49 up 18 days, 18:48,  4 users,  load average: 1.02, 0.92, 0.48
+Tasks: 180 total,   2 running, 178 sleeping,   0 stopped,   0 zombie
+Cpu(s): 49.8%us,  0.5%sy,  0.0%ni, 49.2%id,  0.5%wa,  0.0%hi,  0.0%si,  0.0%st
+Mem:   1815256k total,  1771772k used,    43484k free,    66120k buffers
+Swap:  2031608k total,   734380k used,  1297228k free,   747740k cached
+
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 5946 oracle    25   0  706m 177m 159m R  100 10.0   9:20.26 oracle
+ 6104 oracle    15   0  2324 1060  800 R    1  0.1   0:00.12 top
+31446 oracle    15   0  688m 135m 129m S    0  7.7   0:08.24 oracle
+… output truncated …
+
+In the output, we can see that the process with ID 5946 consumes the most CPU (100 percent) and memory (10 percent) and therefore should be the focus of our attention. To find out more about the process, enter the following command at the UNIX prompt: 
+$ ps -aef|grep 5946
+
+oracle    5946  5945 63 10:59 ?
+00:01:52 oracleD112D2 (DESCRIPTION=(LOCAL=YES)(ADDRESS=(PROTOCOL=beq)))
+
+The output shows the entire description of the process, which is clearly an Oracle “server process”—a process that is created by Oracle Database when a session is established—and that the process has been running for 1 minute and 52 seconds. The next question, then, is which Oracle Database session this process was created for. For that, we should look into another view—V$PROCESS—where the SPID column shows the server process ID. However, this view does not show the session information, so we need to join this view with the familiar V$SESSION view, as follows: 
+select sid
+from v$session s, v$process p
+where p.spid = 5946
+and s.paddr = p.addr;
+
+SID
+———
+37
+
+Once we know the SID, we can get everything we need to know about the session—the user who established the session, the machine it came from, the operating system user, the SQL it is executing, and so on—from the V$SESSION view. To find the SQL being run by session 37, use this query: 
+select sql_fulltext
+from v$sql l, v$session s
+where s.sid = 37
+and l.sql_id = s.sql_id;
+
+Here is the output: 
+select max(test1.owner)
+from test1, test2, test2, test2,
+     test2, test2, test2, test2,
+     test2, test2, test2, test2,
+     test2, test2, test2, test2,
+     test2, test2, test2, test2,
+     test2, test2, test2, test2;
+
+This SQL is performing multiple Cartesian joins, so it’s no wonder it’s consuming so much CPU and memory. 
+Since this session is using most of the CPU, other sessions on the database might be waiting for the CPU to get their job done. But until or unless this session releases the CPU others won't be able to complete their job. So we can kill this high CPU consuming session so that others can complete their execution. And later on we can investigate why this is consuming so much of CPU.
+
+If it is a DML statement then we have check the locking in the database
+
+Step 5 - Find the locking in the database:
+
+The very first step is to find out if there is any locking in the database. Sometime due to locking a session does not get the required resources and the session gets slow.
+
+We can find below command to check locking in the database:
+
+In Standalone:
+
+sql>select s1.username || '@' || s1.machine || ' ( SID=' || s1.sid || ') is blocking'
+       || s2.username || '@' || s2.machine || '( SID=' || s2.sid || ')' from
+       v$lock l1, v$session s1, v$lock l2, v$session s2
+       where s1.sid=l1.sid and s2.sid=l2.sid
+       and l1.block=1 and l2.request > 0
+       and l1.id1=l2.id1
+       and l2.id2=l2.id2;
+
+In RAC:
+
+sql> select s1.username || '@' || s1.machine || ' ( SID=' || s1.sid || ') is blocking'
+        || s2.username || '@' || s2.machine || '( SID=' || s2.sid || ')' from
+       gv$lock l1, gv$session s1, gv$lock l2, gv$session s2
+       where s1.sid=l1.sid and s2.sid=l2.sid
+       and l1.block=1 and l2.request > 0
+       and l1.id1=l2.id1
+       and l2.id2=l2.id2;
+
+
+Query Output:
+
+S1.USERNAME||'@'||S1.MACHINE||'(SID='||S1.SID||')ISBLOCKING'||S2.USERNAME||'@'||
+----------------------------------------------------------------------------------------
+SYS@host1.abc.com ( SID=229) is blockingSYS@host1.abc.com( SID=226)
+
+If we see the locking from above query then we can simply inform to user/application. And if they suggest to kill this blocking session then after killing we can get rid of this slowness.
+
+
+Step 6 - Check for the wait events:
+
+There could be some wait events on the database. Check for the particular user and session.
+
+Query for displaying sessions, session state, and wait details
+
+col "Description" format a50
+select sid,
+        decode(state, 'WAITING','Waiting',
+                'Working') state,
+        decode(state,
+                'WAITING',
+                'So far '||seconds_in_wait,
+                'Last waited '||
+                wait_time/100)||
+        ' secs for '||event
+        "Description"
+from v$session
+where username = 'ARUP';
+
+Output:
+
+SID   STATE       Description
+————— ——————————  ———————————————————————————————————————————————————————
+2832  Working     Last waited 2029 secs for SQL*Net message from client
+3346  Waiting     So far 743 secs for enq: TX - row lock contention
+4208  Waiting     So far 5498 secs for SQL*Net message from client
+
+It clearly shows the state of the sessions: whether they are working or waiting; if they are working, what they were waiting for earlier and for how long; and if they are waiting, what for and for how long.
+
+In many troubleshooting situations, just knowing the SID of each session is not enough. We may need to know other details, such as the client machine the session is connecting from, the user (of both the database and the operating system), and the service name. All of this information is also readily available in the same V$SESSION view we have been using. Let’s briefly examine the columns that provide that information, by running the below query
+
+select SID, osuser, machine, terminal, service_name,
+       logon_time, last_call_et
+from v$session
+where username = 'ARUP';
+
+SID   OSUSER  MACHINE   TERMINAL  SERVICE_NAME  LOGON_TIME LAST_CALL_ET
+————— ——————  ———————   ————————  ————————————  —————————— ————————————
+3346  oradb   prodb1    pts/5     SYS$USERS     05-FEB-12          6848
+2832  oradb   prodb1    pts/6     SERV1         05-FEB-12          7616
+4408  ANANDA  ANLAP     ANLAP     ADHOC         05-FEB-12             0
+
+OSUSER. The operating system user as which the client is connected. The output indicates that session 4408 is connected from the ANLAP machine, where a Windows user, ANANDA, has logged in.
+MACHINE. The name of the machine where the client is running. This could be the database server itself. For two of the sessions, the machine name shows up as “prodb1.” Session 4408 runs on a different machine—ANLAP—presumably a laptop.
+TERMINAL. If the session is connected from a UNIX server, this is the terminal where it runs.
+LOGON_TIME. This shows when the session was first connected to the Oracle Database instance.
+Using the columns shown in Listing 5, you can get very detailed information on a user’s sessions.
+Suppose you receive a complaint that the applications running on the application server named appsvr1 are experiencing performance issues. Listing 6 shows a query against the V$SESSION view—including columns you’ve used in previous queries in this article—for the sessions connected from that machine and the output.
+Code Listing 6: Session waits for a specific machine
+
+col username format a5
+col program format a10
+col state format a10
+col last_call_et head 'Called|secs ago' format 999999
+col seconds_in_wait head 'Waiting|for secs' format 999999
+col event format a50
+select sid, username, program,
+        decode(state, 'WAITING', 'Waiting',
+                'Working') state,
+last_call_et, seconds_in_wait, event
+from v$session
+where machine = 'appsvr1'
+/
+                                       Called      Waiting
+SID   USERNAME  PROGRAM       STATE    secs ago    for secs   EVENT
+————— ———————   ———————————   ———————  —————————   ————————   ——————————————————
+2832  ARUP      sqlplus.exe   Waiting       152         151   SQL*Net message
+                                                              from client
+3089  ARUP      sqlplus.exe   Waiting       146         146   enq: TX - row lock
+                                                              contention
+3346  ARUP      sqlplus.exe   Working        18          49   SQL*Net message
+                                                              from clie
+History of wait events in a specific session 
+
+set lines 120 trimspool on
+col event head "Waited for" format a30
+col total_waits head "Total|Waits" format 999,999
+col tw_ms head "Waited|for (ms)" format 999,999.99
+col aw_ms head "Average|Wait (ms)" format 999,999.99
+col mw_ms head "Max|Wait (ms)" format 999,999.99
+select event, total_waits, time_waited*10 tw_ms,
+       average_wait*10 aw_ms, max_wait*10 mw_ms
+from v$session_event
+where sid = 37
+/
+
+
+                                  Total      Waited     Average         Max
+Waited for                        Waits    for (ms)   Wait (ms)   Wait (ms)
+—————————————————————————— ————————————  ———————————  ——————————  —————————
+Disk file operations I/O              8         .00         .10         .00
+KSV master wait                       2      350.00      173.20      340.00
+os thread startup                     1       20.00       19.30       20.00
+db file sequential read               5      160.00       32.10       70.00
+direct path read                  1,521   51,010.00       33.50      120.00
+direct path read temp           463,035  513,810.00        1.10      120.00
+direct path write temp               20      370.00       18.70       50.00
+resmgr:cpu quantum                   21      520.00       24.60      110.00
+utl_file I/O                          8         .00         .00         .00
+SQL*Net message to client            20         .00         .00         .00
+SQL*Net message from client          20    9,620.00      481.20    9,619.00
+kfk: async disk IO              904,818    3,050.00         .00         .00
+events in waitclass Other            35       20.00         .70       20.00
+
+
+Step 7 - Getting the SQL:
+
+Another key piece of performance tuning information is the SQL statement a session is executing, which will provide more insights into the workings of the session. The same V$SESSION view also shows the SQL statement information. The SQL_ID column in the V$SESSION view shows the ID of the last SQL statement executed. W can get the text of that SQL statement from the V$SQL view, using the SQL_ID value. Here is an example of how I have identified the SQL statement executed by the session that appears slow to the user.
+
+select sql_id
+from v$session
+where sid = 3089;
+
+SQL_ID
+—————————————————
+g0uubmuvk4uax
+
+set long 99999
+select sql_fulltext
+from v$sql
+where sql_id = 'g0uubmuvk4uax';
+SQL_FULLTEXT
+————————————————————————————————————————
+update t1 set col2 = 'y' where col1 = 1
+
+Step 8 - Data Access issue:
+
+Although locking-related contention is a very common cause, it is not the only cause of performance problems. Another major cause of contention is disk I/O. When a session retrieves data from the database data files on disk to the buffer cache, it has to wait until the disk sends the data. This wait shows up for that session as “db file sequential read” (for index scans) or “db file scattered read” (for full-table scans) in the EVENT column, as shown below:
+
+select event
+from v$session
+where sid = 3011;
+
+EVENT
+—————————————————————————
+db file sequential read
+
+When we see this event, we know that the session is waiting for I/O from the disk to complete. To make the session go faster, we have to reduce that waiting period. There are several ways to reduce the wait:
+
+Reduce the number of blocks retrieved by the SQL statement. Examine the SQL statement to see if it is doing a full-table scan when it should be using an index, if it is using a wrong index, or if it can be rewritten to reduce the amount of data it retrieves.
+
+ Place the tables used in the SQL statement on a faster part of the disk. 
+
+Consider increasing the buffer cache to see if the expanded size will accommodate the additional blocks, therefore reducing the I/O and the wait.  
+
+ Tune the I/O subsystem to return data faster.
+
+To find the table causing a wait, we will again use the V$SESSION view. The view’s P1 and P2 columns provide information about the segment the session is waiting for. Below shows a query of P1 and P2, and the output.There are other options as well, but the preceding ones are the most common remediation techniques. The exact activity we undertake depends on our specific situation, but the first technique—reducing the number of blocks retrieved by a SQL statement—almost always works.  When we think about tuning to reduce the number of blocks, we can look at the SQL statement to see which table is being selected from. But what if you see two or more tables in the statement? How do we determine which table is causing the wait?
+
+To find the table causing a wait, we will again use the V$SESSION view. The view’s P1 and P2 columns provide information about the segment the session is waiting for. below query shows a query of P1 and P2, and the output.
+
+Query to  Check data access waits:
+
+select SID, state, event, p1, p2
+from v$session
+where username = 'ARUP';
+
+SID  STATE     EVENT                   P1 P2
+———— ———————   ——————————————————————— —— ————
+2201 WAITING   db file sequential read  5 3011
+
+
+
+The P1 column shows the file ID, and the P2 column shows the block ID. From that information in the above result, we can get the segment name from the extent information in DBA_EXTENTS, as shown below:
+
+select owner, segment_name
+from dba_extents
+where file_id = 5
+and 3011 between block_id
+and block_id + blocks;
+
+OWNER  SEGMENT_NAME
+—————— —————————————
+ARUP   T1
+
+
+This shows that the T1 table, owned by ARUP, is being selected from by the disk in the session. We should direct our attention to this table for tuning. We can move the table to a high-speed disk for faster I/O, or, alternatively, We can focus on making I/O in this table faster by making changes that affect this table, such as creating new indexes, creating materialized views, or building a result cache.
+
+These are the just few general guideline. We can enjoy it most when we really face this situation... :)
+
+Suggestions are most welcome!!!
+
+
+
+Posted by Riyaz Alam at 5:31 AM 
+Email This

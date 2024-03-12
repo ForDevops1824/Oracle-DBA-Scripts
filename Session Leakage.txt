@@ -1,0 +1,55 @@
+
+
+
+
+If the sessions Leakage is more from any schema:- 
+
+select prev_sql_id, count(*),TO_CHAR(current_timestamp,'DD-MON-YYYY HH24:MI:SS') AS COLLECTED_TIME from gv$session where schemaname = 'ACCIDENTREPORTING' and STATUS='KILLED' group by prev_sql_id order by 2 desc;
+
+select SCHEMANAME, count(*),TO_CHAR(current_timestamp,'DD-MON-YYYY HH24:MI:SS') AS COLLECTED_TIME from gv$session where  STATUS='KILLED' group by SCHEMANAME order by 2 desc;
+
+select STATUS, count(*),TO_CHAR(current_timestamp,'DD-MON-YYYY HH24:MI:SS') AS COLLECTED_TIME from gv$session where schemaname = 'ACCIDENTREPORTING' group by STATUS order by 2 desc;
+
+select prev_sql_id, count(*),TO_CHAR(current_timestamp,'DD-MON-YYYY HH24:MI:SS') AS COLLECTED_TIME from gv$session where schemaname = 'ACCIDENTREPORTING' group by prev_sql_id order by 2 desc;
+
+
+Query to find sub partition:-  
+
+dba_segments;
+
+SELECT 'ALTER TABLE ' ||TABLE_OWNER ||'.' ||TABLE_NAME ||' MOVE SUBPARTITION ' ||SUBPARTITION_NAME ||' ONLINE TABLESPACE IRAS_DATA UPDATE INDEXES;' FROM DBA_TAB_SUBPARTITIONS where TABLESPACE_NAME='RETAILDB_DATA' and table_name like '%ARCHIVE%' and NUM_ROWS >= 1;
+
+select a.sid,a.serial#,b.spid,a.status,a.sql_id,a.program,a.prev_sql_id,c.cost from gv$session a,gv$process b,gv$sql_plan c where a.paddr=b.addr and a.sql_id=c.sql_id and c.cost is not null order by c.cost desc;
+
+
+select SEGMENT_NAME,PARTITION_NAME,SEGMENT_TYPE,TABLESPACE_NAME,SEGMENT_SUBTYPE from dba_segments where TABLESPACE_NAME='RETAILDB_DATA';
+
+
+SELECT 'ALTER TABLE ' ||TABLE_OWNER ||'.' ||TABLE_NAME ||' MOVE SUBPARTITION ' ||SUBPARTITION_NAME ||' ONLINE TABLESPACE IRAS_DATA UPDATE INDEXES;' FROM DBA_TAB_SUBPARTITIONS where  tablespace_name='RETAILDB_DATA' AND TABLE_NAME='FC_TRN_DU_LOGS';
+
+select sid,time_remaining,message from v$session_longops where sid=3987;
+
+select * from v$session_longops;
+
+select * from gv$SESSION where SID='3073';
+
+
+SELECT status from dba_indexes where index_name='FC_TRN_DU_LOGSNEW_PK';
+
+
+select machine,sql_id, count(*) from gv$session where schemaname = 'RETAILDB' group by machine, sql_id order by 3 desc;
+
+
+select * from gv$sql where sql_id = '76r9gz2znv3hu';
+
+
+
+
+select segment_name,sum(bytes/1024/1024/1024) from dba_segments where segment_name in ('TBL_DU_OTP_DETAILS',
+'SYS_LOB0000885315C00019$$',
+'SYS_LOB0000885315C00003$$',
+'SYS_LOB0000885315C00004$$',
+'SYS_LOB0000885315C00005$$'
+) group by segment_name;
+ 
+select * from dba_lobs where table_name = 'TBL_DU_OTP_DETAILS';

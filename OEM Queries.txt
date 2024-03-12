@@ -1,0 +1,257 @@
+--All DB backup Details:-
+
+select db_name,input_type,
+output_device_type,status,
+output_bytes_display,time_taken_display,
+to_char(start_time,'DD/MM/YYYY HH24:MI') start_time,
+to_char(end_time,'DD/MM/YYYY HH24:MI') end_time,
+to_char(end_time,'DAY') dayofendtime
+from RMAN_CAT.RC_RMAN_BACKUP_JOB_DETAILS where start_time > sysdate - 1
+order by db_name,input_type;
+
+--For all the database sync status query run on OEM:-
+
+WITH qb_get_dgmetrics AS (
+     select 
+          target_name
+              , MAX( case when column_label = 'Apply Lag (seconds)' then to_number(value) end ) as apply_lag
+          , MAX( case when column_label = 'Transport Lag (seconds)' then to_number(value) end ) as transport_lag
+          , MAX( case when column_label = 'Apply Lag Data Refresh Time' then value end ) as Apply_Refresh_Time
+          , MAX( case when column_label = 'Transport Lag Data Refresh Time' then value end ) as Transport_Refresh_Time
+          , collection_timestamp
+     from mgmt$metric_current
+     where metric_name like '%dataguard%'
+    and metric_label = 'Data Guard Performance' 
+     and column_label in ('Apply Lag (seconds)', 'Transport Lag (seconds)','Apply Lag Data Refresh Time','Transport Lag Data Refresh Time' )
+     group by target_name, collection_timestamp
+)
+select
+     target_name
+     , apply_lag
+     , transport_lag
+     , Apply_Refresh_Time
+     , Transport_Refresh_Time
+     , collection_timestamp 
+from qb_get_dgmetrics order by target_name;
+
+
+
+--File system use
+
+with FSsize as
+(select collection_timestamp, lower(target_name) hostname, round((value/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='Filesystems'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'size'),
+FSAvailable as
+(select collection_timestamp, lower(target_name) hostname, round((value/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='Filesystems'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'available'),
+FSpctAvailable as
+(select collection_timestamp, lower(target_name) hostname, round(value,2) pctAvailable , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='Filesystems'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'pctAvailable'
+)
+select
+   a.collection_timestamp ts#
+   , a.hostname
+   , a.filesystem "Mounted on"
+   , a.size_gb "FS_Size_GB"
+   , (a.size_gb-b.size_gb) "FS_Used_GB"
+   , b.size_gb "FS_Available_GB"
+   , c.pctavailable "Fs_Free_%"
+   , 100-c.pctavailable "Fs_Used_%"
+from FSsize a, FSAvailable b, FSpctAvailable c
+where c.hostname = a.hostname and c.hostname = b.hostname
+and c.collection_timestamp = a.collection_timestamp and c.collection_timestamp = b.collection_timestamp
+and c.filesystem = a.filesystem and c.filesystem = b.filesystem
+and c.filesystem in  ('/oracle','/oragrid','/mnt/backup','/backup','/var','/backup_temp') order by a.hostname
+
+--ASM diskgroup USE
+
+with FSsize as
+(select collection_timestamp, lower(target_name) hostname, round((value/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='DiskGroup_Usage'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'total_mb'),
+FSAvailable as
+(select collection_timestamp, lower(target_name) hostname, round((value/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='DiskGroup_Usage'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'free_mb'),
+FSpctAvailable as
+(select collection_timestamp, lower(target_name) hostname, round(value,2) pctused , key_value filesystem
+from SYSMAN.mgmt$metric_current
+where metric_name ='DiskGroup_Usage'
+  and trunc(collection_timestamp) = trunc(sysdate)
+  and metric_column = 'percent_used'
+)
+select
+   a.collection_timestamp ts#
+   , a.hostname
+   , a.filesystem "Mounted on"
+   , a.size_gb "Total_Size_GB"
+   , b.size_gb "Free size GB"
+   , c.pctused "PCT Used %"
+   , 100-c.pctused "Free %"
+from FSsize a, FSAvailable b, FSpctAvailable c
+where c.hostname = a.hostname and c.hostname = b.hostname
+and c.collection_timestamp = a.collection_timestamp and c.collection_timestamp = b.collection_timestamp
+and c.filesystem = a.filesystem and c.filesystem = b.filesystem
+and c.filesystem not like 'REDO%' and  c.filesystem not like 'OCR%' order by a.hostname
+
+
+
+
+
+
+
+
+
+
+
+--DB Status
+
+SELECT A.HOST_NAME,
+A.DATABASE_NAME,
+H.GROUP_NAME,
+TO_CHAR(A.STARTUP_TIME,'DD-MON-YYYY') "STARTUP_DATE" ,
+TO_CHAR(A.creation_date,'DD-MON-YYYY') "CREATION_DATE",
+A.LOG_MODE,A.CHARACTERSET,A.DBVERSION,
+AVAILABILITY_STATUS,E.SGASIZE,
+G.HOME_LOCATION "ORACLE_HOME",
+F.property_value "PORT",
+C.cpu_count,
+C.CPU_CORE_COUNT,
+SUBSTR(D.OS_SUMMARY,1,40) "OS PLATFORM"
+FROM SYSMAN.MGMT$DB_DBNINSTANCEINFO A,
+SYSMAN.MGMT$AVAILABILITY_CURRENT B,
+SYSMAN.MGMT$DB_CPU_USAGE C ,
+sysman.mgmt$os_hw_summary D,
+sysman.mgmt$db_sga_all E ,
+SYSMAN.MGMT$TARGET_PROPERTIES F ,
+SYSMAN.MGMT$ORACLE_SW_ENT_TARGETS G,
+SYSMAN.MGMT$GROUP_MEMBERS H
+WHERE B.TARGET_TYPE='oracle_database' and
+A.TARGET_NAME=B.TARGET_NAME AND
+A.TARGET_NAME=C.TARGET_NAME AND
+A.HOST_NAME=D.HOST_NAME and
+a.target_name=E.target_name AND
+E.SGANAME='Total SGA (MB)' AND
+A.TARGET_NAME=F.TARGET_NAME AND
+a.target_name=G.TARGET_NAME and
+a.target_name=H.TARGET_NAME and
+F.PROPERTY_NAME='Port' AND 
+h.group_name='ORACLE_PROD'
+ORDER BY host_name desc
+
+
+--DB Growth Report:
+
+SELECT Database,
+Month_Date,
+round(sum(decode(metric_column, 'spaceUsed', maximum))/1024/1024, 3) Used_Size_Tb,
+round(sum(decode(metric_column, 'spaceAllocated', maximum))/1024/1024, 3) Allocated_Size_Tb
+FROM
+(
+SELECT target_name Database, trunc(rollup_timestamp, 'MONTH') Month_Date, key_value TB, metric_column, round(max(maximum),0) maximum
+FROM mgmt$metric_daily
+WHERE target_type = 'rac_database'
+and metric_name = 'tbspAllocation'
+and metric_column in ('spaceAllocated', 'spaceUsed')
+and target_name not like '%DR%'
+GROUP BY target_name, key_value, trunc(rollup_timestamp, 'MONTH'), metric_column
+)
+GROUP BY Database, Month_Date
+ORDER BY Database, Month_Date
+
+
+
+
+--IRAS Long Running Query (More than 600 Second
+
+SELECT DISTINCT
+    x.instance_number,
+    x.sql_id,
+    x.time_per_exec,
+    x.elapsed_time_total,
+    s.begin_interval_time,
+    s.end_interval_time
+FROM
+    (
+        SELECT
+            instance_number,
+            sql_id,
+            snap_id,
+            round((elapsed_time_total / 1000000) /(
+                CASE
+                    WHEN executions_total = 0 THEN
+                        1
+                    ELSE
+                        executions_total
+                END
+            ), 4)                                        time_per_exec,
+            round(elapsed_time_total / 1000000, 4)        elapsed_time_total
+        FROM
+            sys.dba_hist_sqlstat
+    )  x,
+    (
+        SELECT
+            snap_id,
+            MAX(begin_interval_time)     begin_interval_time,
+            MAX(end_interval_time)       end_interval_time
+        FROM
+            sys.dba_hist_snapshot
+        GROUP BY
+            snap_id
+    )  s
+WHERE
+        s.snap_id = x.snap_id
+    AND x.time_per_exec > 600
+    AND x.time_per_exec <> x.elapsed_time_total
+ORDER BY
+    2 ASC,
+    3 DESC,
+    6 DESC
+    
+--Test    
+with FSsize as
+(select rollup_timestamp, lower(target_name) hostname, round((average/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_daily
+where metric_name ='Filesystems'
+  and rollup_timestamp > trunc(sysdate-2)
+  and metric_column = 'size'),
+FSAvailable as
+(select rollup_timestamp, lower(target_name) hostname, round((average/1024),0) size_gb , key_value filesystem
+from SYSMAN.mgmt$metric_daily
+where metric_name ='Filesystems'
+  and rollup_timestamp > trunc(sysdate-2)
+  and metric_column = 'available'),
+FSpctAvailable as
+(select rollup_timestamp, lower(target_name) hostname, round(average,2) pctAvailable , key_value filesystem
+from SYSMAN.mgmt$metric_daily
+where metric_name ='Filesystems'
+  and rollup_timestamp > trunc(sysdate-2)
+  and metric_column = 'pctAvailable'
+)
+select
+   a.rollup_timestamp ts#
+   , a.hostname
+   , a.filesystem "Mounted on"
+   , a.size_gb "FS_Size_GB"
+   , (a.size_gb-b.size_gb) "FS_Used_GB"
+   , b.size_gb "FS_Available_GB"
+   , c.pctavailable "Fs_Free_%"
+   , 100-c.pctavailable "Fs_Used_%"
+from FSsize a, FSAvailable b, FSpctAvailable c
+where c.hostname = a.hostname and c.hostname = b.hostname
+and c.rollup_timestamp = a.rollup_timestamp and c.rollup_timestamp = b.rollup_timestamp
+and c.filesystem = a.filesystem and c.filesystem = b.filesystem
+and c.filesystem = '/oracle'

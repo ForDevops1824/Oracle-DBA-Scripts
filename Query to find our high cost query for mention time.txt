@@ -1,0 +1,70 @@
+Query:- 1
+
+column program format A25
+column machine format A10
+column module format A25
+column user_id format 9999999
+column count format 99999
+SELECT * FROM (
+SELECT /*+ PARALLEL */
+        count(*) AS count,
+        a.user_id, a.program, a.module, a.machine, a.sql_id, c.cost
+        ,ROW_NUMBER() OVER (PARTITION BY a.sql_id ORDER BY c.cost DESC) rank 
+ FROM SYS.DBA_HIST_ACTIVE_SESS_HISTORY a, gv$sql_plan c
+WHERE a.sample_time > TO_DATE('04-AUG-2022 10:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sample_time < TO_DATE('04-AUG-2022 18:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sql_id=c.sql_id
+AND C.COST IS NOT NULL
+GROUP BY a.user_id, a.program, a.module, a.machine, a.sql_id,  c.cost
+ORDER BY a.sql_id,C.COST desc,RANK
+) 
+/
+
+Query:- 2
+
+column program format A25
+column machine format A10
+column module format A25
+column user_id format 9999999
+column count format 99999
+SELECT * FROM (
+SELECT /*+ PARALLEL */
+        count(*) AS count,
+        a.user_id, a.program, a.module, a.machine, a.sql_id, c.cost
+        ,ROW_NUMBER() OVER (PARTITION BY a.sql_id ORDER BY c.cost DESC) rank 
+ FROM SYS.DBA_HIST_ACTIVE_SESS_HISTORY a, gv$sql_plan c
+WHERE a.sample_time > TO_DATE('04-AUG-2022 10:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sample_time < TO_DATE('04-AUG-2022 18:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sql_id=c.sql_id
+AND C.COST IS NOT NULL
+GROUP BY a.user_id, a.program, a.module, a.machine, a.sql_id,  c.cost
+ORDER BY a.sql_id,C.COST desc
+) 
+/
+
+
+Query: -3 (Which is using)
+
+column program format A25
+column machine format A10
+column module format A25
+column user_id format 9999999
+column count format 99999
+SELECT * FROM (
+SELECT /*+ PARALLEL */
+        count(*) AS count,
+        a.user_id, a.program, a.module, a.machine, a.sql_id, c.cost
+        ,ROW_NUMBER() OVER (PARTITION BY a.sql_id ORDER BY c.cost DESC) rank 
+ FROM SYS.DBA_HIST_ACTIVE_SESS_HISTORY a, gv$sql_plan c
+WHERE a.sample_time > TO_DATE('04-AUG-2022 10:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sample_time < TO_DATE('04-AUG-2022 18:00:00','DD-MON-YYYY HH24:MI:SS')
+AND a.sql_id=c.sql_id
+AND C.COST IS NOT NULL
+GROUP BY a.user_id, a.program, a.module, a.machine, a.sql_id,  c.cost
+ORDER BY a.sql_id,C.COST desc
+)  where rank = 1 order by cost desc
+/
+
+
+
+

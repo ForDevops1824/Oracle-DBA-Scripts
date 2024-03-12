@@ -1,0 +1,61 @@
+--select * from LPGOPS.LPGO_TRN_FE_HEADER as of timestamp TO_TIMESTAMP('2022-08-10 11:09:25', 'YYYY-MM-DD HH24:MI:SS');
+==========================
+
+Please restore the MISR_ETHANOL_MAIL_LOGS table   in MISR schema  ,oracle 19C.
+ 
+Restore time till 4pm  today 
+
+SELECT * FROM MISR.MISR_ETHANOL_MAIL_LOGS AS OF TIMESTAMP TO_TIMESTAMP('2022-11-26 16:00:00', 'YYYY-MM-DD HH:MI:SS');
+   
+Create table MISR.MISR_ETHANOL_MAIL_LOGS_Temp2 as  Select * from MISR.MISR_ETHANOL_MAIL_LOGS AS OF TIMESTAMP TO_TIMESTAMP('2022-11-26 16:00:00', 'YYYY-MM-DD HH24:MI:SS');
+   
+=====================================
+
+
+Query to show data in a table on a timeframe:
+
+select count(*) from RETAILDB.HIST_RSP_IOCL where  to_date(DATAB, 'YYYY-MM-DD') >= TO_DATE('2021-01-01', 'YYYY-MM-DD') AND to_date(DATAB, 'YYYY-MM-DD') <= TO_DATE('2021-03-31', 'YYYY-MM-DD');
+
+
+
+Will Show Data if Rows Deleted:
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+select * from DBA2.LPD as of timestamp TO_TIMESTAMP('09-11-2022 06:11:00', 'DD-MM-YYYY HH24:MI:SS');
+
+
+
+To Find Last DDL Executed Time on a Table:
+xxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+select OWNER,OBJECT_NAME,CREATED,LAST_DDL_TIME from dba_objects where OBJECT_NAME='LPD';
+
+
+
+If Any DDL Statement got executed on Partocular table:
+xxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+select * from DBA2.LPD as of timestamp TO_TIMESTAMP('09-11-2022 06:11:00', 'DD-MM-YYYY HH24:MI:SS');
+
+
+ORA-01466: unable to read data - table definition has changed
+01466. 00000 -  "unable to read data - table definition has changed"
+*Cause:    Query parsed after tbl (or index) change, and executed
+           w/old snapshot
+*Action:   commit (or rollback) transaction, and re-execute
+Error at Line: 1 Column: 20
+
+
+To See Latest Modifications on a Table:
+xxxxxxxxxxxxxxxxxxxx
+
+
+desc dba_tab_modifications
+
+
+select * from dba_tab_modifications where TABLE_NAME='LPD';
+
+
+
+https://asktom.oracle.com/pls/apex/f?p=100:11:::::P11_QUESTION_ID:9542288900346279064
